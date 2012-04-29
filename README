@@ -6,7 +6,6 @@ This is still a very much experiemental script.  The design methodology errs ver
 Dependencies:
     MP3::Tag
     Text::Capitalize
-    File::Find
     File::Copy
     File::Copy::Recursive
     File::Path
@@ -14,9 +13,7 @@ Dependencies:
     DB_File
     Digest::MD5
     Storable
-    Getopt::Long
     Image::Magick
-    File::Spec
 
 Help:
     normalize_audio_library.pl
