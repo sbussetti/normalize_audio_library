@@ -322,7 +322,6 @@ sub wanted__normalize {
     next unless $ext and -f $File__Find__name;
 
     $FILE_COUNT++;
-    print STDERR $File__Find__name, "\n";
     _show_progress($FILE_COUNT/$TOTAL_FILES);
 
     my ($tag, $mp3, $mp4) = @{$TAGS->{_remove_extended_chars(uc($File__Find__name))}};
