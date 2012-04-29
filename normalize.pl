@@ -372,9 +372,10 @@ sub wanted__normalize {
             my ($tag, $mp3, $mp4) = @{$TAGS->{$afile}};
             $disks->{$tag->{'disk'}} = 1;
         }        
-        
+        my @disks = keys %$disks;
+
         my $disk = undef;
-        if ($tag->{'disk'} && length(keys(%$TAGS)) > 1 ) {
+        if ($tag->{'disk'} && @disks > 1 ) {
             my ($this_disk, $total_disks) = m~^(\d+)/(\d+)$~;
             ## itunes strips leading zeros from disks, if present..
             s/^0+// foreach ($this_disk, $total_disks);
@@ -396,7 +397,6 @@ sub wanted__normalize {
     } else {
         $new_basename = sprintf '%s - %02d - %s.'.$ext, $tag->{artist}, $tag->{track}, $tag->{title};
     }
-
     ##directory prep...
     my $full_path = File::Spec->catpath(undef, $DIR->{ROOT}, $new_relpath);
     ## if target exists, we're okay
