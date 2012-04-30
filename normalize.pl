@@ -295,20 +295,19 @@ sub normalize_paths {
 
         my $tp = $DIR->{BACKUP}.'/'.$e ;
         my $md = 0;
-        my $loop = 1;
         do {
             if ( -e $tp.($md ? '.'.$md : '') ) {
                 $md++;
             } else {
-                $loop = 0;
+                last
             }
-        } while ($loop);
+        } while (1);
         print STDERR "Removing empty dir: $dir\n";
         my $emptyd = $tp.($md ? '.'.$md : ''); 
         if ($OS eq 'WINDOWS') {
             _casemove($dir, $emptyd) or die "Failed to move: $dir => $emptyd";
         } else {
-            move($dir, $emptyd) or die "Failed to move: $dir => $emptyd";
+            dirmove($dir, $emptyd) or die "Failed to move: $dir => $emptyd";
         }
     }
 }
@@ -900,8 +899,6 @@ sub _remove_extended_chars {
     $a =~ s/[^\x00-\x7f]/_/g;
     return $a;
 }
-
-
 
 __END__
 ## PATCHED MP4::INFO to remove a lot of the assumtions made by the author.  Really noone would want to know album artist AND artist?
