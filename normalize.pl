@@ -759,21 +759,21 @@ sub _get_tags {
     
         ## monkeypatch in allowing direct access to albumartist..
         $mp4->{_permitted}->{'AART'} = 1;
-
+    
         $tag = {
-            'album' => $mp4->ALB,
-            'artist' => $mp4->ART,
-            'album_artist' => $mp4->{AART},
+            'album' => sprintf('%s', $mp4->ALB),
+            'artist' => sprintf('%s', $mp4->ART),
+            'album_artist' => sprintf('%s', $mp4->{AART}),
             'disk' => $mp4->DISK,
-            'title' => $mp4->NAM,
+            'title' => sprintf('%s', $mp4->NAM),
             'track' => $mp4->TRKN,
-            'grouping' => $mp4->GRP,
-            'compilation' => $mp4->CPIL or 0,
-            '_apple_store_id' => $mp4->APID,
+            'grouping' => sprintf('%s', $mp4->GRP),
+            'compilation' => ($mp4->CPIL or 0),
+            '_apple_store_id' => sprintf('%s', $mp4->APID),
         };
         ## basically if disk or track are numeric 0, then just blank it out
-        $tag->{'disk'} = (${$tag->{'disk'}}[0] or undef) if (ref $tag->{'disk'} eq 'ARRAY');
-        $tag->{'track'} = (${$tag->{'track'}}[0] or undef) if (ref $tag->{'track'} eq 'ARRAY');
+        $tag->{'disk'} = (sprintf('%s', ${$tag->{'disk'}}[0]) or undef) if (ref $tag->{'disk'} eq 'ARRAY');
+        $tag->{'track'} = (sprintf('%s', ${$tag->{'track'}}[0]) or undef) if (ref $tag->{'track'} eq 'ARRAY');
     } elsif ($ext =~ /mp3/i) {
         $mp3 = MP3::Tag->new($file) or die "Cannot parse Tags for: $file";
         $mp3->get_tags();
@@ -803,7 +803,7 @@ sub _get_tags {
 
         ## handle N/Y track format, and discard track count which never gets used
         my ($trackn, $total_tracks);
-        if (($trackn, $total_tracks) = $tag->{'track'} =~ m/^(\d+)\/(\d+)$/) {
+        if (($trackn, $total_tracks) = $tag->{'track'} =~ m/^\s*(\d+)\s*[\/_]\s*(\d+)\s*$/) {
             $tag->{'track'} = $trackn;
         }
 
