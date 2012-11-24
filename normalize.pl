@@ -39,6 +39,7 @@ $|=1;
 #   if the script is interrupted during a move operation.
 # * More accurate progress.  Postprocess happens after the majority of actions, but there's also the very last pass that re-recurses down 
 #   the entire tree from the root -- maybe prevent that anyway, but pre and postproc should be considered...
+# * Either me or Text::Capitalize is still mucking up some unicode characters in tag names.  Unicode in filenames is OK  
 #
 # Testing:
 # * Another duplication/validation strategy would be to count up all ocurrances of track/disc numbers for albums that match on title.
@@ -71,9 +72,9 @@ my $OS = 'UNIX';
 my $DISPATCHED = 0; ## true if we successfully dispatched an action..
 
 my @LEAVE_DIRS = ();
-my @EMPTYDIRS = ();
 my $TAGS = {};
 my $DIRALBTRACKS = {};
+my @EMPTYDIRS = ();
 my $z = tie my %FILE_HASH, 'DB_File', '/tmp/file_hash.db', O_RDWR|O_CREAT, 0666, $DB_HASH
         or print STDERR "cannot open database file: $!\n" and exit;
 
@@ -289,26 +290,27 @@ sub normalize_paths {
             wanted => \&wanted__normalize,
             postprocess => \&postprocess__normalize
         }, @CURRENT_JOB);
-    }
-    foreach my $dir (@EMPTYDIRS) {
-        my $e = basename($dir);
+        ## remove our list of empty directories..
+        ## can't do it as we go or File::Find will cry
+        foreach my $dir (@EMPTYDIRS) {
+            my $e = basename($dir);
 
-        my $tp = $DIR->{BACKUP}.'/'.$e ;
-        my $md = 0;
-        do {
-            if ( -e $tp.($md ? '.'.$md : '') ) {
-                $md++;
-            } else {
-                last
+            if ($DIR->{BACKUP}) {
+                my $tp = $DIR->{BACKUP}.'/'.$e ;
+                my $md = 0;
+                do { $md++ } while ( -e $tp.($md ? '.'.$md : ''));
+                print STDERR "Removing empty dir: $dir\n";
+                my $emptyd = $tp.($md ? '.'.$md : ''); 
+                if ($OS eq 'WINDOWS') {
+                    _casemove($dir, $emptyd) or die "Failed to move: $dir => $emptyd";
+                } else {
+                    dirmove($dir, $emptyd) or die "Failed to move: $dir => $emptyd";
+                }
+            } else { #delete
+                remove_tree($dir) or die "Failed to delete: $dir";
             }
-        } while (1);
-        print STDERR "Removing empty dir: $dir\n";
-        my $emptyd = $tp.($md ? '.'.$md : ''); 
-        if ($OS eq 'WINDOWS') {
-            _casemove($dir, $emptyd) or die "Failed to move: $dir => $emptyd";
-        } else {
-            dirmove($dir, $emptyd) or die "Failed to move: $dir => $emptyd";
         }
+        @EMPTYDIRS = ();
     }
 }
 sub wanted__normalize {
@@ -333,7 +335,6 @@ sub wanted__normalize {
         }
         #this one is good! removes unsafe characters!!!
         $tag->{$_} =~ s/([\/\\\*\|\:"\<\>\?]|^\.|\.$)/_/g;
-        $tag->{$_} = encode('utf8', $tag->{$_});
         $SKIP_ON_MISSING_TAG = "$_ is blank" and last if (not /^(disk|track)$/ and /^\s*$/) or not defined $_;
     }
     print STDERR "ERROR: Field $SKIP_ON_MISSING_TAG\n" && next if $SKIP_ON_MISSING_TAG;
@@ -363,6 +364,7 @@ sub wanted__normalize {
     my $new_relpath = join '/', @pparts;
 
     my $new_basename = undef;
+    my $track_ph = $tag->{track} =~ /[^0-9]/ ? '%s' : '%02d';
     if ($ITUNES_COMPAT) {
         ## itunes optionally prefixes with disc number if there is a disc flag.
         ## more precisely it only does this if the album has more than one disc
@@ -388,13 +390,14 @@ sub wanted__normalize {
         my $max_title_length = 40 - length('.'.$ext) - ($disk ? length($disk)+1 : 0) - length(sprintf('%02d', $tag->{track}));
         my $ititle = substr $tag->{title}, 0, $max_title_length;
         $ititle =~ s/\s+$//;
+        
         if ($disk) {
-            $new_basename = sprintf '%d-%02d %s.'.$ext, $disk, $tag->{track}, $ititle;
+            $new_basename = sprintf '%d-'.$track_ph.' %s.'.$ext, $disk, $tag->{track}, $ititle;
         } else {
-            $new_basename = sprintf '%02d %s.'.$ext, $tag->{track}, $ititle;
+            $new_basename = sprintf $track_ph.' %s.'.$ext, $tag->{track}, $ititle;
         }
     } else {
-        $new_basename = sprintf '%s - %02d - %s.'.$ext, $tag->{artist}, $tag->{track}, $tag->{title};
+        $new_basename = sprintf '%s - '.$track_ph.' - %s.'.$ext, $tag->{artist}, $tag->{track}, $tag->{title};
     }
     ##directory prep...
     my $full_path = File::Spec->catpath(undef, $DIR->{ROOT}, $new_relpath);
@@ -505,9 +508,15 @@ sub wanted__normalize {
 }
 
 sub postprocess__normalize {
+    ## recursing is pointless b/c we're in a DFS..
+    if ( $File::Find::dir ne $DIR->{SEARCH} && ! _recurse_for_empty($File::Find::dir) ) {
+        ## turtles all the way down
+        #print STDERR "EMPTY: ", $File::Find::dir, "\n";
+        push @EMPTYDIRS, $File::Find::dir;
+    }
+=head1
     $DIRALBTRACKS = {};
-    @_ = _postprocess__count_album_tracks(@_);
-    @_ = _postprocess__find_empty_folders(@_);
+    _postprocess__count_album_tracks;
     foreach my $art (keys %$DIRALBTRACKS){
         foreach my $alb (keys %{$DIRALBTRACKS->{$art}}){
             foreach my $disc (keys %{$DIRALBTRACKS->{$art}->{$alb}}){
@@ -519,39 +528,75 @@ sub postprocess__normalize {
             }
         }
     }
+=cut
 }
-sub _postprocess__find_empty_folders {
-    #warn "TEST: $File::Find::dir";
-    if ( $File::Find::dir ne $DIR->{SEARCH} && ! _recurse_for_empty($File::Find::dir) ) {
-        ## turtles all the way down
-        #warn "Removing empty: $File::Find::dir";
-        #remove_tree($File::Find::dir)
-        push @EMPTYDIRS, $File::Find::dir;
-    }
-    return @_;
-}
+=head1
 sub _postprocess__count_album_tracks {
-    foreach my $f ( @_ ) {
-        my $lf = $File::Find::dir.'/'.$f;
-        my $File__Find__name = encode('utf8', decode('utf8', $lf));
-        next if $f =~ /^\.{1,2}$/ || ! -f $lf || $f !~ /\.(mp[34]a?|m4a|aac)$/i;
-        
-        my ($tag, $mp3, $mp4) = @{$TAGS->{_remove_extended_chars(uc($File__Find__name))}};
+    if ( $File::Find::dir ne $DIR->{SEARCH}) {
+        print STDERR "PCAT: $File::Find::dir\n";
+        foreach my $f ( @_ ) {
+            my $lf = $File::Find::dir.'/'.$f;
+            print STDERR "PCAT: SUB $lf\n";
+            my $File__Find__name = encode('utf8', decode('utf8', $lf));
+            next if $f =~ /^\.{1,2}$/ || ! -f $lf || $f !~ /\.(mp[34]a?|m4a|aac)$/i;
+            
+            my ($tag, $mp3, $mp4) = @{$TAGS->{_remove_extended_chars(uc($File__Find__name))}};
 
-        my $disk = ( $tag->{'disk'} || 1 );
-        my $artist = ( $tag->{'album_artist'} || $tag->{'artist'} );
-        my $track = int $tag->{'track'};
-        $DIRALBTRACKS->{$artist}->{$tag->{'album'}}->{$disk}->{$track}++;
+            my $disk = ( $tag->{'disk'} || 1 );
+            my $artist = ( $tag->{'album_artist'} || $tag->{'artist'} );
+            my $track = int $tag->{'track'};
+            $DIRALBTRACKS->{$artist}->{$tag->{'album'}}->{$disk}->{$track}++;
+        }
     }
-    return @_;
 }
+=cut
 
 sub preprocess__normalize {
     @_ = _preprocess__cache_tags(@_);
-    @_ = _preprocess__fix_album_artist_capitalization(@_);
+    @_ = _preprocess__fix_album_artist(@_);
     @_ = _preprocess__find_album_art(@_);
 }
-sub _preprocess__fix_album_artist_capitalization {
+sub _preprocess__cache_tags {
+    $TAGS = {};  # free up some references for garbage collector..
+    foreach my $f ( @_ ) {
+        my ($name, $ext) = $f =~ m/^(.*)\.(mp[34]a?|m4a|aac)$/i;
+        my $lf = $File::Find::dir.'/'.$f;
+        next unless $ext and -f $lf;
+        my $File__Find__name = encode('utf8', decode('utf8', $lf));
+        $TAGS->{_remove_extended_chars(uc($File__Find__name))} = [_get_tags($lf, $ext)];
+    }
+    return @_;
+}
+sub _preprocess__fix_album_artist {
+    return @_ unless keys(%$TAGS);
+    my (@albums, @album_artists, @artists);
+    foreach my $key (keys %$TAGS){
+        my ($tag, $mp3, $mp4) = @{$TAGS->{$key}};
+        push @albums, $tag->{album};
+        push @album_artists, $tag->{album_artist};
+        push @artists, $tag->{artist};
+    }
+    foreach (\@albums, \@album_artists, \@artists) {
+        my %seen = ();
+        my @u = grep { ! $seen{ $_ }++ } @{$_};
+        @{$_} = @u;
+    }
+    my $identical_artists = (@artists == 1 ? 1 : 0);
+    my $identical_albums = (@albums == 1 ? 1 : 0);
+    my $identical_album_artists = (@album_artists == 1 ? 1 : 0);
+    #print "ART $identical_artists, ALB: $identical_albums, ARTALB: $identical_album_artists\n\n";
+    my $album_mask = {};
+    if ($albums[0] =~ /\bsplit\b/i and @artists == 2) {
+        if (not $identical_artists and $identical_albums) {
+            $album_mask->{album_artist} = join ' / ', @artists;
+        }
+    } else {
+        if (not $identical_artists and $identical_albums and not $identical_album_artists){
+            $album_mask->{album_artist} = 'Various Artists';
+            $album_mask->{compilation} = 1;
+        }
+    }
+
     foreach my $f ( @_ ) {
         my $lf = $File::Find::dir.'/'.$f;
         my $File__Find__name = encode('utf8', decode('utf8', $lf));
@@ -562,16 +607,16 @@ sub _preprocess__fix_album_artist_capitalization {
 
 
         my $update = {};
+        ## fill in blank album artist..
         if ( ! defined $tag->{'album_artist'} || $tag->{'album_artist'} =~ /^\s*$/ ) {
-            print STDERR "Filling in album artist for $lf\n";
-            $update->{'album_artist'} = $tag->{'album_artist'} = $tag->{'artist'};
+            $update->{'album_artist'} = $tag->{'artist'};
         }
-
 
         my $fix = {
             album => capitalize_title($tag->{album}, PRESERVE_ALLCAPS => 1),
-            album_artist => capitalize_title($tag->{album_artist}, PRESERVE_ALLCAPS => 1),
-            artist => capitalize_title($tag->{artist}, PRESERVE_ALLCAPS => 1)
+            album_artist => capitalize_title((defined $album_mask->{album_artist} ? $album_mask->{album_artist} : $tag->{album_artist}), PRESERVE_ALLCAPS => 1),
+            artist => capitalize_title($tag->{artist}, PRESERVE_ALLCAPS => 1),
+            compilation => (defined $album_mask->{compilation} ? $album_mask->{compilation} : $tag->{compilation}),
         };
         foreach my $k (qw/artist album_artist/) { 
             $fix->{$k} =~ s/(.+),\s+The\s*$/The $1/i;
@@ -579,28 +624,33 @@ sub _preprocess__fix_album_artist_capitalization {
 
         foreach my $k ( keys %$fix ) {
             if ($tag->{$k} ne $fix->{$k}) {
+                print $tag->{$k}, ' ne ', $fix->{$k}, "\n";
                 $update->{$k} = $fix->{$k};
             }
         }
 
+        ## update cache
+        @{$tag}{keys %$update} = values %$update;
+
+        ## write out
         if (my @uk = keys %$update) {
             my @pairs = map { "([$_] $update->{$_})" } @uk;
             print STDERR "Updating tags ".join(' ',@pairs)."\n";
             
-            if ($update->{'album_artist'}) {
-                if ($mp3) {
-                    $mp3->set_id3v2_frame('TPE2', $update->{'album_artist'});
-                }
+            if (exists $update->{'album_artist'}) {
+                $mp3->set_id3v2_frame('TPE2', $update->{'album_artist'});
                 delete $update->{'album_artist'};
             }
-            if ($mp3) {
-                $mp3->update_tags($update);
-                $mp3->update_tags;
+            if (exists $update->{'compilation'}) {
+                my $id3 = $mp3->{ID3v2};
+                my $comp_frame = $id3->version < 3 ? 'TCP' : 'TCMP';
+                $mp3->set_id3v2_frame($comp_frame, $update->{'compilation'});
+                delete $update->{'compilation'};
             }
+            $mp3->update_tags($update);
+            $mp3->update_tags;
         }
-        if ($mp3) {
-            $mp3->close;
-        }
+        $mp3->close;
     }
     return @_;     
 }
@@ -686,18 +736,19 @@ sub _preprocess__find_album_art {
 
     @_;
 }
-sub _preprocess__cache_tags {
-    $TAGS = {};  # free up some references for garbage collector..
-    foreach my $f ( @_ ) {
-        my $lf = $File::Find::dir.'/'.$f;
-        my $File__Find__name = encode('utf8', decode('utf8', $lf));
-        my ($name, $ext) = $lf =~ m/^(.*)\.(mp[34]a?|m4a|aac)$/i;
-        next unless $ext and -f $lf;
-        $TAGS->{_remove_extended_chars(uc($File__Find__name))} = [_get_tags($lf, $ext)];
-    }
-    return @_;
-}
 
+sub _identical {
+    my $ref = shift;
+    return 1 unless @$ref;
+    my $cmp = $ref->[0];
+    my $equal = defined $cmp ?
+        sub { defined($_[0]) and $_[0] eq $cmp } :
+        sub { not defined $_[0] };
+    for my $v (@$ref){
+        return 0 unless $equal->($v);
+    }
+    return 1;
+}
 sub _get_tags {
     my ($file, $ext) = (shift, shift);
     my ($tag, $mp3, $mp4);
@@ -717,7 +768,7 @@ sub _get_tags {
             'title' => $mp4->NAM,
             'track' => $mp4->TRKN,
             'grouping' => $mp4->GRP,
-            'compilation' => $mp4->CPIL,
+            'compilation' => $mp4->CPIL or 0,
             '_apple_store_id' => $mp4->APID,
         };
         ## basically if disk or track are numeric 0, then just blank it out
@@ -750,12 +801,24 @@ sub _get_tags {
         $tag->{'disk'} = $mp3->disk1;
         $tag->{'album_artist'} = $id3->get_frame('TPE2');
 
+        ## handle N/Y track format, and discard track count which never gets used
+        my ($trackn, $total_tracks);
+        if (($trackn, $total_tracks) = $tag->{'track'} =~ m/^(\d+)\/(\d+)$/) {
+            $tag->{'track'} = $trackn;
+        }
+
+        my $comp_frame = $id3->version < 3 ? 'TCP' : 'TCMP';
+        $tag->{'compilation'} = $id3->get_frame($comp_frame) or 0;
+
         ## some tags have genre data in their TIT1 frame
         ## that'd be fine, but MP3::Info concatenates these fields.. (sucks!)
         my $tit1 = $id3->get_frame('TIT1');
         if (defined $tit1 and $tit1 ne '') {
             $tag->{'title'} = $id3->get_frame('TIT2');
         }
+    }
+    foreach (keys %$tag) {
+        $tag->{$_} = encode('utf8', $tag->{$_});
     }
     return ($tag, $mp3, $mp4);
 }
@@ -777,7 +840,7 @@ sub _recurse_for_empty {
     foreach my $d ( @check_dirs ) {
         if ( -d $ddir.'/'.$d ) {
             $content_count += _recurse_for_empty($ddir.'/'.$d, $depth+1);
-        } elsif ( $d =~ /\.(cue|sfv|doc|nfo|log|m3u|ini|db|jpe?g|png|bmp|txt)$/i || $d !~ /\./ ) {  #no period, no extension at all, must be junk
+        } elsif ( $d =~ /^((._)?.DS_Store|.*\.(cue|sfv|doc|nfo|log|m3u|ini|db|jpe?g|png|bmp|txt))$/i || $d !~ /\./ ) {  #no period, no extension at all, must be junk
             #print "EMPTY $d \n";
             next;
         } else {
@@ -899,7 +962,6 @@ sub _remove_extended_chars {
     $a =~ s/[^\x00-\x7f]/_/g;
     return $a;
 }
-
 __END__
 ## PATCHED MP4::INFO to remove a lot of the assumtions made by the author.  Really noone would want to know album artist AND artist?
 ## dude you're writing a perl lib.. it's cool to have helpers but it's bullshit to obfuscate the frame data..
