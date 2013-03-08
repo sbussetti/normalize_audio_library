@@ -25,6 +25,8 @@ use Cwd qw//;
 my @libs = <main::DATA>;
 eval join('', @libs);
 
+binmode STDOUT, 'utf8';
+binmode STDERR, 'utf8';
 $|=1;
 
 
@@ -341,6 +343,7 @@ sub wanted__normalize {
     }
     print STDERR "ERROR: Field $SKIP_ON_MISSING_TAG\n" && next if $SKIP_ON_MISSING_TAG;
 
+
     my $md5;
     if ( ! exists $FILE_HASH{_remove_extended_chars(uc($File__Find__name))} ) {
         $md5 = _md5sum($File::Find::name);
@@ -628,7 +631,7 @@ sub _preprocess__fix_album_artist {
 
         foreach my $k ( keys %$fix ) {
             if ($tag->{$k} ne $fix->{$k}) {
-                print $tag->{$k}, ' ne ', $fix->{$k}, "\n";
+                #print $tag->{$k}, ' ne ', $fix->{$k}, "\n";
                 $update->{$k} = $fix->{$k};
             }
         }
