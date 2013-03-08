@@ -318,8 +318,10 @@ sub wanted__normalize {
     ## moves audio files only to paths following their album / artist / track names
     ## ignores all other files, except folder.jpg...
     my ($name, $ext) = m/^(.*)\.(mp[34]a?|m4a|aac)$/i;
-    my $File__Find__name = encode('utf8', decode('utf8', $File::Find::name));
-    my $File__Find__dir = encode('utf8', decode('utf8', $File::Find::dir));
+    #my $File__Find__name = encode('utf8', decode('utf8', $File::Find::name));
+    #my $File__Find__dir = encode('utf8', decode('utf8', $File::Find::dir));
+    my $File__Find__name = decode('utf8', $File::Find::name);
+    my $File__Find__dir = decode('utf8', $File::Find::dir);
     next unless $ext and -f $File__Find__name;
 
     $FILE_COUNT++;
@@ -562,7 +564,7 @@ sub _preprocess__cache_tags {
         my ($name, $ext) = $f =~ m/^(.*)\.(mp[34]a?|m4a|aac)$/i;
         my $lf = $File::Find::dir.'/'.$f;
         next unless $ext and -f $lf;
-        my $File__Find__name = encode('utf8', decode('utf8', $lf));
+        my $File__Find__name = decode('utf8', $lf);
         $TAGS->{_remove_extended_chars(uc($File__Find__name))} = [_get_tags($lf, $ext)];
     }
     return @_;
@@ -572,6 +574,7 @@ sub _preprocess__fix_album_artist {
     my (@albums, @album_artists, @artists);
     foreach my $key (keys %$TAGS){
         my ($tag, $mp3, $mp4) = @{$TAGS->{$key}};
+
         push @albums, $tag->{album};
         push @album_artists, $tag->{album_artist};
         push @artists, $tag->{artist};
@@ -599,7 +602,8 @@ sub _preprocess__fix_album_artist {
 
     foreach my $f ( @_ ) {
         my $lf = $File::Find::dir.'/'.$f;
-        my $File__Find__name = encode('utf8', decode('utf8', $lf));
+        #my $File__Find__name = encode('utf8', decode('utf8', $lf));
+        my $File__Find__name = decode('utf8', $lf);
         ## we can't write to mp4s so this only runs on mp3s...
         next if $f =~ /^\.{1,2}$/ || ! -f $lf || $f !~ /\.mp3$/i;
         
@@ -647,8 +651,7 @@ sub _preprocess__fix_album_artist {
                 $mp3->set_id3v2_frame($comp_frame, $update->{'compilation'});
                 delete $update->{'compilation'};
             }
-            $mp3->update_tags($update);
-            $mp3->update_tags;
+            _update_idv3_tag($mp3, $update);
         }
         $mp3->close;
     }
@@ -749,6 +752,11 @@ sub _identical {
     }
     return 1;
 }
+sub _update_idv3_tag {
+    my ($mp3, $update) = (shift, shift);
+    $mp3->update_tags($update);
+    $mp3->update_tags;
+}
 sub _get_tags {
     my ($file, $ext) = (shift, shift);
     my ($tag, $mp3, $mp4);
@@ -789,8 +797,7 @@ sub _get_tags {
                 $extract->{$t} = $tag if defined $tag and $tag ne '';
             }
             $mp3->new_tag('ID3v2');
-            $mp3->update_tags($extract);
-            $mp3->update_tags;
+            _update_idv3_tag($mp3, $extract);
             $id3 = $mp3->{ID3v2};
         }
         print STDERR "ID3 NOT AVAILABLE FOR: $file\n" and return () unless $id3;
@@ -816,9 +823,6 @@ sub _get_tags {
         if (defined $tit1 and $tit1 ne '') {
             $tag->{'title'} = $id3->get_frame('TIT2');
         }
-    }
-    foreach (keys %$tag) {
-        $tag->{$_} = encode('utf8', $tag->{$_});
     }
     return ($tag, $mp3, $mp4);
 }
