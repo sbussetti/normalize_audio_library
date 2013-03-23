@@ -382,7 +382,7 @@ sub wanted__normalize {
 
         my $disk = undef;
         if ($tag->{'disk'} && @disks > 1 ) {
-            my ($this_disk, $total_disks) = m~^(\d+)/(\d+)$~;
+            my ($this_disk, $total_disks) = m~^(\s+)/(\s+)$~;
             ## itunes strips leading zeros from disks, if present..
             s/^0+// foreach ($this_disk, $total_disks);
             if ($total_disks > 1) {
@@ -397,7 +397,7 @@ sub wanted__normalize {
         $ititle =~ s/\s+$//;
         
         if ($disk) {
-            $new_basename = sprintf '%d-'.$track_ph.' %s.'.$ext, $disk, $tag->{track}, $ititle;
+            $new_basename = sprintf '%s-'.$track_ph.' %s.'.$ext, $disk, $tag->{track}, $ititle;
         } else {
             $new_basename = sprintf $track_ph.' %s.'.$ext, $tag->{track}, $ititle;
         }
