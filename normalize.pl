@@ -332,17 +332,6 @@ sub wanted__normalize {
     my ($tag, $mp3, $mp4) = @{$TAGS->{_remove_extended_chars(uc($File__Find__name))}};
     next if not $tag;  ## tag parser will bitch to logs about what's wrong..
 
-    my $SKIP_ON_MISSING_TAG = 0;
-    foreach ( keys %$tag) {
-        if ($OS eq 'WINDOWS') {
-            $tag->{$_} = _remove_extended_chars($tag->{$_});
-        }
-        #this one is good! removes unsafe characters!!!
-        $tag->{$_} =~ s/([\/\\\*\|\:"\<\>\?]|^\.|\.$)/_/g;
-        $SKIP_ON_MISSING_TAG = "$_ is blank" and last if (not /^(disk|track)$/ and /^\s*$/) or not defined $_;
-    }
-    print STDERR "ERROR: Field $SKIP_ON_MISSING_TAG\n" && next if $SKIP_ON_MISSING_TAG;
-
 
     my $md5;
     if ( ! exists $FILE_HASH{_remove_extended_chars(uc($File__Find__name))} ) {
@@ -376,6 +365,7 @@ sub wanted__normalize {
         my $disks = {};
         for my $afile (keys %$TAGS){
             my ($tag, $mp3, $mp4) = @{$TAGS->{$afile}};
+            next if not $tag;
             $disks->{$tag->{'disk'}} = 1;
         }        
         my @disks = keys %$disks;
@@ -611,6 +601,7 @@ sub _preprocess__fix_album_artist {
         next if $f =~ /^\.{1,2}$/ || ! -f $lf || $f !~ /\.mp3$/i;
         
         my ($tag, $mp3, $mp4) = @{$TAGS->{_remove_extended_chars(uc($File__Find__name))}};
+        next if not $tag;
 
 
         my $update = {};
@@ -619,11 +610,13 @@ sub _preprocess__fix_album_artist {
             $update->{'album_artist'} = $tag->{'artist'};
         }
 
+        my $albart = (defined $album_mask->{album_artist} ? $album_mask->{album_artist} : $tag->{album_artist});
+        my $comp = (defined $album_mask->{compilation} ? $album_mask->{compilation} : $tag->{compilation});
         my $fix = {
-            album => capitalize_title($tag->{album}, PRESERVE_ALLCAPS => 1),
-            album_artist => capitalize_title((defined $album_mask->{album_artist} ? $album_mask->{album_artist} : $tag->{album_artist}), PRESERVE_ALLCAPS => 1),
+            #album => capitalize_title($tag->{album}, PRESERVE_ALLCAPS => 1),
+            album_artist => capitalize_title($albart, PRESERVE_ALLCAPS => 1),
             artist => capitalize_title($tag->{artist}, PRESERVE_ALLCAPS => 1),
-            compilation => (defined $album_mask->{compilation} ? $album_mask->{compilation} : $tag->{compilation}),
+            compilation => $comp,
         };
         foreach my $k (qw/artist album_artist/) { 
             $fix->{$k} =~ s/(.+),\s+The\s*$/The $1/i;
@@ -639,22 +632,33 @@ sub _preprocess__fix_album_artist {
         ## update cache
         @{$tag}{keys %$update} = values %$update;
 
-        ## write out
-        if (my @uk = keys %$update) {
-            my @pairs = map { "([$_] $update->{$_})" } @uk;
-            print STDERR "Updating tags ".join(' ',@pairs)."\n";
-            
-            if (exists $update->{'album_artist'}) {
-                $mp3->set_id3v2_frame('TPE2', $update->{'album_artist'});
-                delete $update->{'album_artist'};
+        ## write out.
+
+        ## if we update one tag we need to update them all.  Here's why
+        ## MP3 tag does a super sweet job of reading encodings
+        ## but then if we only write back out one tag, something
+        ## definitely is writing to all the tags anyway and seems to mung
+        ## encoding when things are like latin1 with a utf8 encoding byte
+        if (keys %$update) {
+            my %out = (%$tag, %$update);
+            my $out = \%out;
+
+            if (my @uk = keys %$out) {
+                my @pairs = map { "([$_] $out->{$_})" } @uk;
+                print STDERR "Updating tags ".join(' ',@pairs)."\n";
+                
+                if (exists $out->{'album_artist'}) {
+                    $mp3->set_id3v2_frame('TPE2', $out->{'album_artist'});
+                    delete $out->{'album_artist'};
+                }
+                if (exists $out->{'compilation'}) {
+                    my $id3 = $mp3->{ID3v2};
+                    my $comp_frame = $id3->version < 3 ? 'TCP' : 'TCMP';
+                    $mp3->set_id3v2_frame($comp_frame, $out->{'compilation'});
+                    delete $out->{'compilation'};
+                }
+                _update_idv3_tag($mp3, $out);
             }
-            if (exists $update->{'compilation'}) {
-                my $id3 = $mp3->{ID3v2};
-                my $comp_frame = $id3->version < 3 ? 'TCP' : 'TCMP';
-                $mp3->set_id3v2_frame($comp_frame, $update->{'compilation'});
-                delete $update->{'compilation'};
-            }
-            _update_idv3_tag($mp3, $update);
         }
         $mp3->close;
     }
@@ -757,6 +761,10 @@ sub _identical {
 }
 sub _update_idv3_tag {
     my ($mp3, $update) = (shift, shift);
+
+    #for my $t (keys %$update) {
+    #    $update->{$t} = decode('utf8', encode('utf8', $update->{$t}));
+    #}
     $mp3->update_tags($update);
     $mp3->update_tags;
 }
@@ -787,12 +795,14 @@ sub _get_tags {
         $tag->{'track'} = (sprintf('%s', ${$tag->{'track'}}[0]) or undef) if (ref $tag->{'track'} eq 'ARRAY');
     } elsif ($ext =~ /mp3/i) {
         $mp3 = MP3::Tag->new($file) or die "Cannot parse Tags for: $file";
+        $mp3->config(id3v2_fix_encoding_on_write => 'TRUE', );
         $mp3->get_tags();
         my $id3 = $mp3->{ID3v2};
         ## this auto-transfers id3v1
         unless ($id3) {
             print STDERR "Auto-transfering ID3v1 info for $file\n";
             my $id31 = $mp3->{ID3v1};
+
             print STDERR "ID3v2 and 1 NOT AVAILABLE FOR: $file\n" and return () unless $id31;
             my $extract = {};
             for my $t (qw/artist album title year comment track genre/) {
@@ -827,6 +837,23 @@ sub _get_tags {
             $tag->{'title'} = $id3->get_frame('TIT2');
         }
     }
+
+    my $SKIP_ON_MISSING_TAG = 0;
+    foreach ( keys %$tag) {
+        if ($OS eq 'WINDOWS') {
+            $tag->{$_} = _remove_extended_chars($tag->{$_});
+        }
+        #this one is good! removes unsafe characters!!!
+        $tag->{$_} =~ s/([\/\\\*\|\:"\<\>\?]|^\.|\.$)/_/g;
+        if (not /^(disk|track|grouping|compilation|album_artist|_apple_store_id)$/ and ($tag->{$_} =~ /^\s*$/ or not defined $tag->{$_})){
+
+            print STDERR "ERROR: Field $_ is empty\n";
+            return (undef, undef, undef);
+        }
+    }
+
+    #print Dumper($tag), "\n";
+
     return ($tag, $mp3, $mp4);
 }
 sub _recurse_for_empty {
