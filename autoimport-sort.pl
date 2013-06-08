@@ -31,7 +31,7 @@ END {
 }
 use strict;
 
-my $ROOT_DIR = '/mnt/STORAGE1/Unsorted';
+my $ROOT_DIR = '';
 my $INCOMING_DIR = catdir($ROOT_DIR, 'incoming');
 my $UNRAR = '/usr/bin/unrar';
 my $UNZIP = '/usr/bin/unzip';
