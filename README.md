@@ -20,11 +20,11 @@ The venerable normalizer script.
 
 ### Help:
 
-    normalize_audio_library.pl
-
+    normalize.pl
     Arguments are processed positionally. (So they must be specified in the order listed here).
     Directory options must all preceed processing options.
-    Usage: normalize_audio_library.pl [DIRECTORY OPTIONS] [PROCESSING OPTIONS] [PROCESSING ACTIONS]
+
+    Usage: normalize.pl [DIRECTORY OPTIONS] [PROCESSING OPTIONS] [PROCESSING ACTIONS]
 
      -h, --help                  prints this message
 
@@ -34,8 +34,6 @@ The venerable normalizer script.
                                  process is done in-place
      -b, --backup_dir=DIR        the script makes backups for certain transforms; they go
                                  here
-     -t, --total_files=INT       in case you already know and don't want to wait for it
-                                 to rescan total
 
     Processing Options
      -u, --itunes_compat         itunes compatability mode.  follows itunes file naming
@@ -43,7 +41,7 @@ The venerable normalizer script.
                                  "keep media folder organized"
 
     Processing Actions
-     -n, --normalize_paths       clean up
+     -n, --normalize_paths       clean up (does the heavy lifting, you usually want this)
      -i, --locate_lowres_images  scans for your normalized folder.jpg files and complains
                                  if they are low resolution
 

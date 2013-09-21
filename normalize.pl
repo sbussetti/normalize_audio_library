@@ -96,7 +96,6 @@ END { &cleanup }
 GetOptions(
     'help|h' => \&help,
 
-    'total_files|t=i' => \$TOTAL_FILES,  ## in case you know and don't want to wait for a scan
     'search_dir|s=s' => \$SEARCH_DIR,   ## where your files to be organized live
     'root_dir|r=s' => \$ROOT_DIR,     ## where you want organized files to end up.  If not specified, fix is done in-place
     'backup_dir|b=s' => \$BACKUP_DIR, ## where you want backups to go of modified files..
@@ -141,12 +140,13 @@ sub dispatch {
     $map->{$opt}->();
 }
 sub help {
-    print q[
-normalize_audio_library.pl 
-
+    my $basename = basename($0);
+    print qq[
+$basename 
 Arguments are processed positionally. (So they must be specified in the order listed here).
 Directory options must all preceed processing options.
-Usage: normalize_audio_library.pl [DIRECTORY OPTIONS] [PROCESSING OPTIONS] [PROCESSING ACTIONS]
+
+Usage: $basename [DIRECTORY OPTIONS] [PROCESSING OPTIONS] [PROCESSING ACTIONS]
 
  -h, --help                  prints this message
  
@@ -156,8 +156,6 @@ Directory Options
                              process is done in-place
  -b, --backup_dir=DIR        the script makes backups for certain transforms; they go
                              here
- -t, --total_files=INT       in case you already know and don't want to wait for it 
-                             to rescan total
 
 Processing Options
  -u, --itunes_compat         itunes compatability mode.  follows itunes file naming
@@ -165,7 +163,7 @@ Processing Options
                              "keep media folder organized"
 
 Processing Actions
- -n, --normalize_paths       clean up
+ -n, --normalize_paths       clean up (does the heavy lifting, you usually want this)
  -i, --locate_lowres_images  scans for your normalized folder.jpg files and complains 
                              if they are low resolution
 ];
