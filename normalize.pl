@@ -347,6 +347,7 @@ sub wanted__normalize {
 
     my @pparts = ();
     if ($ITUNES_COMPAT){
+        print $tag->{album_artist}, ' ', $tag->{artist}, ' ',  $tag->{album}, "\n";
         @pparts = map { $_ = substr($_, 0, 40); s/(^\s+|\s+$)//g; $_  } ( ( $tag->{album_artist} || $tag->{artist} ), $tag->{album} );
     } else {
         @pparts = ( ( $tag->{album_artist} || $tag->{artist} ), $tag->{album} );
@@ -355,7 +356,8 @@ sub wanted__normalize {
         }
     }
 
-    my $new_relpath = join '/', @pparts;
+    my @safe_pparts = map { _safe_filename($_) } @pparts;
+    my $new_relpath = join '/', @safe_pparts;
 
     my $new_basename = undef;
     my $track_ph = $tag->{track} =~ /[^0-9]/ ? '%s' : '%02d';
@@ -394,6 +396,9 @@ sub wanted__normalize {
     } else {
         $new_basename = sprintf '%s - '.$track_ph.' - %s.'.$ext, $tag->{artist}, $tag->{track}, $tag->{title};
     }
+   
+    $new_basename = _safe_filename($new_basename);
+ 
     ##directory prep...
     my $full_path = File::Spec->catpath(undef, $DIR->{ROOT}, $new_relpath);
     ## if target exists, we're okay
@@ -840,11 +845,6 @@ sub _get_tags {
 
     my $SKIP_ON_MISSING_TAG = 0;
     foreach ( keys %$tag) {
-        if ($OS eq 'WINDOWS') {
-            $tag->{$_} = _remove_extended_chars($tag->{$_});
-        }
-        #this one is good! removes unsafe characters!!!
-        $tag->{$_} =~ s/([\/\\\*\|\:"\<\>\?]|^\.|\.$)/_/g;
         if (not /^(disk|track|grouping|compilation|album_artist|_apple_store_id)$/ and ($tag->{$_} =~ /^\s*$/ or not defined $tag->{$_})){
 
             print STDERR "ERROR: Field $_ is empty\n";
@@ -994,6 +994,16 @@ sub _convert_art {
 sub _remove_extended_chars {
     my $a = shift;
     $a =~ s/[^\x00-\x7f]/_/g;
+    return $a;
+}
+
+sub _safe_filename {
+    my $a = shift;
+    if ($OS eq 'WINDOWS') {
+        $a = _remove_extended_chars($a);
+    }
+    #this one is good! removes unsafe characters!!!
+    $a =~ s/([\/\\\*\|\:"\<\>\?]|^\.|\.$)/_/g;
     return $a;
 }
 __END__

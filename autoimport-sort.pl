@@ -31,7 +31,7 @@ END {
 }
 use strict;
 
-my $ROOT_DIR = '';
+my $ROOT_DIR = '/mnt/STORAGE1/Unsorted';
 my $INCOMING_DIR = catdir($ROOT_DIR, 'incoming');
 my $UNRAR = '/usr/bin/unrar';
 my $UNZIP = '/usr/bin/unzip';
@@ -160,18 +160,19 @@ while (my $case = readdir(DIR)) {
     #if we moved all the files we found, the dir is empty... (should move entire dir tree..)
     ## this needs to be revisited.. i think just actually check if the dir is empty..
     #if (@SEARCH and @WANTED and @SEARCH == @WANTED + @JUNK) {
-    my $deliter = File::Iterator->new(DIR => $CASE_PATH, RECURSE => 1);
-    my $NOT_EMPTY = 0;
-    while (my $file = $deliter->next) { $NOT_EMPTY++; }
-    if ($NOT_EMPTY) { 
-        print LOG "($NOT_EMPTY) FILES REMAIN, DO NOTHING\n";
-    } else {
-        print LOG "FULLY CLEANED (".@SEARCH."); REMOVING $CASE_PATH\n";
-        if (! $DRY_RUN) {
-            remove_tree($CASE_PATH);
+    if ( -d $CASE_PATH) {
+        my $deliter = File::Iterator->new(DIR => $CASE_PATH, RECURSE => 1);
+        my $NOT_EMPTY = 0;
+        while (my $file = $deliter->next) { $NOT_EMPTY++; }
+        if ($NOT_EMPTY) { 
+            print LOG "($NOT_EMPTY) FILES REMAIN, DO NOTHING\n";
+        } else {
+            print LOG "FULLY CLEANED (".@SEARCH."); REMOVING $CASE_PATH\n";
+            if (! $DRY_RUN) {
+                remove_tree($CASE_PATH);
+            }
         }
     }
-    
 
     print LOG "\n\n\n=====================================\n\n\n";
 }
@@ -192,7 +193,7 @@ sub process {
     my $START_CWD = getcwd;
 
     ## RARS  RAR ARA RAR
-    my @rarch = grep { /\.(rar|r0+)$/ } @SEARCH;
+    my @rarch = grep { /\.(rar|r?0+)$/ } @SEARCH;
     if ( @rarch  ) {
         ## maybe there's more than one individual archive..
         for my $rarch (@rarch) {
