@@ -347,7 +347,7 @@ sub wanted__normalize {
 
     my @pparts = ();
     if ($ITUNES_COMPAT){
-        print $tag->{album_artist}, ' ', $tag->{artist}, ' ',  $tag->{album}, "\n";
+        #print $tag->{album_artist}, ' ', $tag->{artist}, ' ',  $tag->{album}, "\n";
         @pparts = map { $_ = substr($_, 0, 40); s/(^\s+|\s+$)//g; $_  } ( ( $tag->{album_artist} || $tag->{artist} ), $tag->{album} );
     } else {
         @pparts = ( ( $tag->{album_artist} || $tag->{artist} ), $tag->{album} );
@@ -569,10 +569,10 @@ sub _preprocess__cache_tags {
 }
 sub _preprocess__fix_album_artist {
     return @_ unless keys(%$TAGS);
-    my (@albums, @album_artists, @artists);
+    my (@albums, @album_artists, @artists, $marked_as_comp) = (), (), (), 0;
     foreach my $key (keys %$TAGS){
         my ($tag, $mp3, $mp4) = @{$TAGS->{$key}};
-
+        $marked_as_comp = 1 if $tag->{compilation};
         push @albums, $tag->{album};
         push @album_artists, $tag->{album_artist};
         push @artists, $tag->{artist};
@@ -588,14 +588,20 @@ sub _preprocess__fix_album_artist {
     #print "ART $identical_artists, ALB: $identical_albums, ARTALB: $identical_album_artists\n\n";
     my $album_mask = {};
     if ($albums[0] =~ /\bsplit\b/i and @artists == 2) {
-        if (not $identical_artists and $identical_albums) {
-            $album_mask->{album_artist} = join ' / ', @artists;
+        ## for splits don't endlessly retag
+        if ($identical_album_artists and not ($album_artists[0] eq join(' / ', @artists) or $album_artists[1] eq join(' / ', reverse @artists))) {
+            if (not $identical_artists and $identical_albums) {
+                $album_mask->{album_artist} = join ' / ', @artists;
+            }
         }
-    } else {
-        if (not $identical_artists and $identical_albums and not $identical_album_artists){
-            $album_mask->{album_artist} = 'Various Artists';
-            $album_mask->{compilation} = 1;
-        }
+    } elsif (not $identical_artists and $identical_albums and not $identical_album_artists){
+        ## for VA only mess with albums that lack a consistent album artist?
+        $album_mask->{album_artist} = 'Various Artists';
+        $album_mask->{compilation} = 1;
+    }
+
+    if ($marked_as_comp) {
+        print STDERR "Album in $File::Find::dir previously marked as comp.\n"
     }
 
     foreach my $f ( @_ ) {
@@ -609,24 +615,47 @@ sub _preprocess__fix_album_artist {
         next if not $tag;
 
 
-        my $update = {};
         ## fill in blank album artist..
-        if ( ! defined $tag->{'album_artist'} || $tag->{'album_artist'} =~ /^\s*$/ ) {
-            $update->{'album_artist'} = $tag->{'artist'};
+        my $albartist = undef;
+        if ( ! defined $tag->{'album_artist'} || "$tag->{album_artist}" =~ /^\s*$/ ) {
+            $albartist = $tag->{'artist'};
+        } else {
+            $albartist = (exists $album_mask->{album_artist} ? $album_mask->{album_artist} : $tag->{album_artist});
+        }
+        my $comp = (exists $album_mask->{compilation} ? $album_mask->{compilation} : $tag->{compilation});
+
+        my ($cap_album, $cap_album_artist, $cap_artist) = '', '', '';
+
+        eval { $cap_album = capitalize_title($tag->{album}, PRESERVE_ALLCAPS => 1) };
+        if ($@ or not $cap_album) {
+            print STDERR "$lf: album capitalization error ($tag->{album})\n";
+            next;
         }
 
-        my $albart = (defined $album_mask->{album_artist} ? $album_mask->{album_artist} : $tag->{album_artist});
-        my $comp = (defined $album_mask->{compilation} ? $album_mask->{compilation} : $tag->{compilation});
+        eval { $cap_album_artist = capitalize_title($albartist, PRESERVE_ALLCAPS => 1) };
+        if ($@ or not $cap_album_artist) {
+            print STDERR "$lf: album artist capitalization error ($albartist)\n";
+            next;
+        }
+
+        eval { $cap_artist = capitalize_title($tag->{artist}, PRESERVE_ALLCAPS => 1) };
+        if ($@ or not $cap_artist) {
+            print STDERR "$lf: artist capitalization error ($tag->{artist})\n";
+            next;
+        }
+
         my $fix = {
-            #album => capitalize_title($tag->{album}, PRESERVE_ALLCAPS => 1),
-            album_artist => capitalize_title($albart, PRESERVE_ALLCAPS => 1),
-            artist => capitalize_title($tag->{artist}, PRESERVE_ALLCAPS => 1),
+            album => $cap_album,
+            album_artist => $cap_album_artist,
+            artist => $cap_artist,
             compilation => $comp,
         };
+
         foreach my $k (qw/artist album_artist/) { 
             $fix->{$k} =~ s/(.+),\s+The\s*$/The $1/i;
         }
 
+        my $update = {};
         foreach my $k ( keys %$fix ) {
             if ($tag->{$k} ne $fix->{$k}) {
                 #print $tag->{$k}, ' ne ', $fix->{$k}, "\n";
@@ -919,7 +948,7 @@ sub _md5sum{
         close(FILE);
     };
     if($@){
-        print $@;
+        print STDERR "$file :: $@";
         return "";
     }
     return $digest;
@@ -996,7 +1025,6 @@ sub _remove_extended_chars {
     $a =~ s/[^\x00-\x7f]/_/g;
     return $a;
 }
-
 sub _safe_filename {
     my $a = shift;
     if ($OS eq 'WINDOWS') {
@@ -1006,7 +1034,10 @@ sub _safe_filename {
     $a =~ s/([\/\\\*\|\:"\<\>\?]|^\.|\.$)/_/g;
     return $a;
 }
-__END__
+
+
+
+__DATA__
 ## PATCHED MP4::INFO to remove a lot of the assumtions made by the author.  Really noone would want to know album artist AND artist?
 ## dude you're writing a perl lib.. it's cool to have helpers but it's bullshit to obfuscate the frame data..
 #
