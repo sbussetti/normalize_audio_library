@@ -9,16 +9,17 @@ A file agnostic presorter.  Behavior still hardcoded into head of script -- need
 ## normalize.pl
 
 ### Dependencies:
-  * MP3::Tag
-  * Text::Capitalize
+  * DB_File
+  * Digest::MD5
+  * File::Basename
   * File::Copy
   * File::Copy::Recursive
   * File::Path
-  * File::Basename
-  * DB_File
-  * Digest::MD5
-  * Storable
   * Image::Magick
+  * IO::String
+  * MP3::Tag
+  * Storable
+  * Text::Capitalize
 
 ### Help:
 
