@@ -1,7 +1,6 @@
 #!/usr/bin/perl
 use strict;
 use utf8;
-use MP3::Tag;
 use Text::Capitalize qw/capitalize_title/;
 use File::Copy qw/copy move/;
 use Digest::MD5 qw/md5_hex/;
@@ -70,6 +69,7 @@ my $FILE_COUNT = 0;
 my $TOTAL_FILES = 0;
 my $ITUNES_COMPAT = 0;
 my $OS = 'UNIX';
+my $DEBUG = 0;
 
 my $DISPATCHED = 0; ## true if we successfully dispatched an action..
 
@@ -79,8 +79,6 @@ my $DIRALBTRACKS = {};
 my @EMPTYDIRS = ();
 my $z = tie my %FILE_HASH, 'DB_File', '/tmp/file_hash.db', O_RDWR|O_CREAT, 0666, $DB_HASH
         or print STDERR "cannot open database file: $!\n" and exit;
-
-MP3::Tag->config(write_v24 => 'TRUE'); ## enable "mostly acceptable" ID3v2.4 writing
 
 ## EXIT HANDLER
 sub cleanup {
@@ -96,16 +94,15 @@ END { &cleanup }
 GetOptions(
     'help|h' => \&help,
 
-    'search_dir|s=s' => \$SEARCH_DIR,   ## where your files to be organized live
-    'root_dir|r=s' => \$ROOT_DIR,     ## where you want organized files to end up.  If not specified, fix is done in-place
-    'backup_dir|b=s' => \$BACKUP_DIR, ## where you want backups to go of modified files..
-
+    'search_dir|s=s' => \$SEARCH_DIR,       ## where your files to be organized live
+    'root_dir|r=s' => \$ROOT_DIR,           ## where you want organized files to end up.  
+                                            ## If not specified, fix is done in-place
+    'backup_dir|b=s' => \$BACKUP_DIR,       ## where you want backups to go of modified files..
     'itunes_compat|u' => \$ITUNES_COMPAT,
-
-    'locate_duplicates|d' => \&dispatch,  ## NOT VERY SMART YET
+    'locate_duplicates|d' => \&dispatch,    ## NOT VERY SMART YET
     'list_duplicates|l' => \&dispatch,    
     'normalize_paths|n' => \&dispatch,
-    'locate_lowres_images|i' => \&dispatch,  ## STILL UNDER DEVELOPMENT...
+    'locate_lowres_images|i' => \&dispatch, ## STILL UNDER DEVELOPMENT...
 );
 
 help() and exit 0 if not $DISPATCHED;
@@ -129,7 +126,7 @@ sub dispatch {
         make_path($d) unless -d $d;
     }
     
-    print Dumper($DIR), "\n";
+    print Dumper($DIR), "\n" if $DEBUG;
     my $map = {
         'locate_duplicates' => \&locate_duplicates,
         'list_duplicates' => \&list_duplicates,
@@ -139,6 +136,7 @@ sub dispatch {
     $DISPATCHED = 1;
     $map->{$opt}->();
 }
+
 sub help {
     my $basename = basename($0);
     print qq[
@@ -184,12 +182,18 @@ sub setup_file_count_globals {
     }
     print "\nFound $TOTAL_FILES to process.  beginning search...\n";
 }
+
 sub wanted__filecount_mpx_finder { 
-        next unless -f && /^(.*\.(mp[34]a?|m4a|aac))$/i; $TOTAL_FILES++; print "\rFound: $TOTAL_FILES"; _flush(*STDOUT); 
+    next unless -f && /^(.*\.(mp[34]a?|m4a|aac))$/i; $TOTAL_FILES++; print "\rFound: $TOTAL_FILES"; _flush(*STDOUT); 
 }
+
 sub wanted__filecount_jpg_finder { 
-        next unless -f && /^(.*\.jpg)$/i; $TOTAL_FILES++; print "\rFound: $TOTAL_FILES"; _flush(*STDOUT); 
+    next unless -f && /^(.*\.jpg)$/i; $TOTAL_FILES++; print "\rFound: $TOTAL_FILES"; _flush(*STDOUT); 
 }
+
+#######
+# ====================================================
+#######
 
 sub locate_duplicates {
     setup_file_count_globals;
@@ -199,6 +203,7 @@ sub locate_duplicates {
     }, $DIR->{SEARCH});
 
 }
+
 sub wanted__locate_duplicates {
     next unless -f && /^(.*\.(mp[34]a?|m4a|aac))$/i; 
 
@@ -219,6 +224,7 @@ sub wanted__locate_duplicates {
     }
     print STDERR "######### SYNC #########\n" and $z->sync if ! ( $FILE_COUNT % 100 );
 }
+
 sub list_duplicates {
     my %SEEN_HASH = ();
     my %MULTI_KEYS = ();  ## once there's more than one we need to note it.
@@ -248,6 +254,7 @@ sub locate_lowres_images {
             wanted => \&wanted__locate_lowres_images,
     }, $DIR->{SEARCH});
 }
+
 sub wanted__locate_lowres_images {
     ## is more or less a post-process step for normalize_paths
     ## and will likely become one once it's finished
@@ -313,6 +320,7 @@ sub normalize_paths {
         @EMPTYDIRS = ();
     }
 }
+
 sub wanted__normalize {
 
     ## moves audio files only to paths following their album / artist / track names
@@ -346,7 +354,13 @@ sub wanted__normalize {
     my @pparts = ();
     if ($ITUNES_COMPAT){
         #print $tag->{album_artist}, ' ', $tag->{artist}, ' ',  $tag->{album}, "\n";
-        @pparts = map { $_ = substr($_, 0, 40); s/(^\s+|\s+$)//g; $_  } ( ( $tag->{album_artist} || $tag->{artist} ), $tag->{album} );
+        eval {
+            @pparts = map { $_ = substr($_, 0, 40); s/(^\s+|\s+$)//g; $_  } ( 
+                '' . ($tag->{album_artist} || $tag->{artist} || ''), 
+                '' . ($tag->{album} || '')
+            );
+        };
+        die "$@: ".Dumper($tag) if $@;
     } else {
         @pparts = ( ( $tag->{album_artist} || $tag->{artist} ), $tag->{album} );
         if ( $tag->{'disk'} ) {
@@ -528,6 +542,7 @@ sub postprocess__normalize {
     }
 =cut
 }
+
 =head1
 sub _postprocess__count_album_tracks {
     if ( $File::Find::dir ne $DIR->{SEARCH}) {
@@ -554,6 +569,7 @@ sub preprocess__normalize {
     @_ = _preprocess__fix_album_artist(@_);
     @_ = _preprocess__find_album_art(@_);
 }
+
 sub _preprocess__cache_tags {
     $TAGS = {};  # free up some references for garbage collector..
     foreach my $f ( @_ ) {
@@ -565,6 +581,7 @@ sub _preprocess__cache_tags {
     }
     return @_;
 }
+
 sub _preprocess__fix_album_artist {
     return @_ unless keys(%$TAGS);
     my (@albums, @album_artists, @artists, $marked_as_comp) = (), (), (), 0;
@@ -696,6 +713,7 @@ sub _preprocess__fix_album_artist {
     }
     return @_;     
 }
+
 sub _preprocess__find_album_art {
 
     foreach my $dir ( @_ ) {
@@ -791,6 +809,7 @@ sub _identical {
     }
     return 1;
 }
+
 sub _update_idv3_tag {
     my ($mp3, $update) = (shift, shift);
 
@@ -800,6 +819,7 @@ sub _update_idv3_tag {
     $mp3->update_tags($update);
     $mp3->update_tags;
 }
+
 sub _get_tags {
     my ($file, $ext) = (shift, shift);
     my ($tag, $mp3, $mp4);
@@ -826,6 +846,13 @@ sub _get_tags {
         $tag->{'disk'} = (sprintf('%s', ${$tag->{'disk'}}[0]) or undef) if (ref $tag->{'disk'} eq 'ARRAY');
         $tag->{'track'} = (sprintf('%s', ${$tag->{'track'}}[0]) or undef) if (ref $tag->{'track'} eq 'ARRAY');
     } elsif ($ext =~ /mp3/i) {
+        # suppress Perl 5.22 warnings from MP3::Tag::parse_prepare
+        local $SIG{__WARN__} = sub {
+            warn @_ unless $_[0] =~ m(^Unescaped left brace in regex is deprecated);
+        };
+        eval 'use MP3::Tag';
+        MP3::Tag->config(write_v24 => 'TRUE'); ## enable "mostly acceptable" ID3v2.4 writing
+
         $mp3 = MP3::Tag->new($file) or die "Cannot parse Tags for: $file";
         $mp3->config(id3v2_fix_encoding_on_write => 'TRUE', );
         $mp3->get_tags();
@@ -883,6 +910,7 @@ sub _get_tags {
 
     return ($tag, $mp3, $mp4);
 }
+
 sub _recurse_for_empty {
     my ($ddir, $depth) = (shift, shift);
     my $base = basename($ddir); 
@@ -915,9 +943,11 @@ sub _recurse_for_empty {
     #print "$content_count files.\n";
     return $content_count;
 }
+
 sub _flush {
-       my $h = select($_[0]); my $a=$|; $|=1; $|=$a; select($h);
+   my $h = select($_[0]); my $a=$|; $|=1; $|=$a; select($h);
 }
+
 sub _show_progress {
     my ($progress) = @_;
     my $stars   = '*' x int($progress*10);
@@ -926,6 +956,7 @@ sub _show_progress {
     print("\r$stars $percent");
     _flush(*STDOUT);
 }
+
 sub _casemove {
     my ($a,$b) = @_;
     my $r = sprintf '%4d', rand(9999);
@@ -935,6 +966,7 @@ sub _casemove {
     rmove($a.'-'.$r, $b) or die $!;
     return 1;
 }
+
 sub _md5sum{
     my $file = shift;
     my $digest = "";
@@ -951,6 +983,7 @@ sub _md5sum{
     }
     return $digest;
 }
+
 sub _move_art {
     my ($ldir,$file,$reason) = @_;
     my ($base,$ext) = $file =~ m/(.+)\.(.{3})$/;
@@ -959,6 +992,7 @@ sub _move_art {
     move( "$ldir/$file", "$ldir/folder.$ext" ) or die "$ldir/$file $!";
     _convert_art("folder.$ext", "$ldir/folder.$ext", $ldir);
 }
+
 sub _convert_art {
     (local $_, my $name, my $dir) = @_;
 
@@ -1018,11 +1052,13 @@ sub _convert_art {
 
     return 1;
 }
+
 sub _remove_extended_chars {
     my $a = shift;
     $a =~ s/[^\x00-\x7f]/_/g;
     return $a;
 }
+
 sub _safe_filename {
     my $a = shift;
     if ($OS eq 'WINDOWS') {
